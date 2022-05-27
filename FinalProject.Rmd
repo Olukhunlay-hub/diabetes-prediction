@@ -2,7 +2,7 @@
 title: "Stat 515: Visualization for Analytics"
 author: "Kunle"
 date: "May 5, 2022"
-output: html_document
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
