@@ -1,0 +1,507 @@
+---
+title: "Stat 515: Visualization for Analytics"
+author: "Kunle Apanisile"
+date: "May 5, 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Introduction
+Diabetes is caused as a result of high blood sugar. According to the national diabetes statistics report, it was estimated that about 3.2 million people of all ages (10.5%) of the United States population had diabetes in 2018 (National Diabetes Statistics Report, 2020). This high rate of diabetic people calls for a need to identify the factors that contribute to this increase either through genetic predisposition or diet and lifestyle.
+
+
+#### Objectives
+The essence of this process is to explore factors that contribute to a patient being diabetic and predict if a patient has diabetes or not using logistic regression, decision tree and random forest.  Also, a performance evaluation of this algorithms will be compared.
+
+
+#### Dataset Description
+The data for this project consist of a genetically similar group of Pima Indian heritage with several diagnostic measures of type 2 diabetes, all of which are female and at least 21 years of age. The dataset has 768 observations and 9 variables. The variables are:
+
+* Pregnancies ---- Number of times Pregnant
+* Glucose ---- The blood plasma glucose concentration after a 2 hour oral glucose tolerance test.
+* BloodPressure ---- Diastolic blood pressure (mm Hg).
+* SkinThickness ---- Skinfold thickness of the triceps (mm).
+* Insulin ---- 2-hour serum insulin (mu U/ml).
+* BMI ---- Body mass index (kg/m squared).
+* DiabetesPedigreeFunction ---- A function that determines the risk of type 2 diabetes based on family history, the larger the function, the higher the risk of type 2 diabetes.
+* Age (Years)
+* Outcome ---- Whether the person is diagnosed with type 2 diabetes (1 = Positive, 0 = Negative).
+
+
+#### Data Source
+The dataset is available  the UCI Repository Of Machine Learning Databases:  http://www.ics.uci.edu/~mlearn/MLRepository.html
+and also on Kaggle: https://www.kaggle.com/datasets/uciml/pima-indians-diabetes-database?resource=download
+
+
+```{r, message = FALSE, warning=FALSE}
+# Importing the library
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+```
+
+
+```{r,data_diabetes, message=FALSE}
+# Loading the data
+df <-
+  read_csv("diabetes.csv")
+
+```
+
+#### Exploratory Analysis
+
+The response variable (Outcome) datatype is converted from numeric to categorical and ordered as 1 to be “Pos” and 0 to be “Neg”. A distribution of the variable is show n in the plot below.
+
+```{r,datatype}
+# change the datatype of the response variable
+df$Outcome = as.factor(df$Outcome)
+df$Outcome <- factor(df$Outcome, levels=c("0", "1"),
+                     labels = c("Neg", "Pos")) 
+
+```
+
+```{r, data_class}
+ggplot(df, aes(x= Outcome, fill = Outcome)) + 
+  geom_bar(color = 'black') +
+  labs(title = "Diabetes Classification", x = "Diabetes") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(0,550),
+                     expand = c(0,0))
+```
+
+The plot shows that there are almost twice as many patients without diabetes than there are with diabetes.
+
+#### Descriptive Statistics
+
+```{r, data_stru}
+# Structure of the data
+str(df)
+```
+
+```{r, data_length}
+dim(df)
+```
+
+The variables in the dataset are:
+```{r, data_names}
+names(df)
+
+```
+
+```{r, df_summ}
+summary(df)
+```
+
+#### Handling Missing Values
+```{r, dat_check}
+# Check sum of missing values
+sum(is.na(df))
+
+```
+Although the summary statistics and the check on missing data shows that there are no missing values, but variable such as “BloodPressure”, “Glucose”, “SkinThickness”, “BMI”, and Insulin that can never be zero in a practical sense. For instance, Blood pressure, Diastolic blood pressure measured to be lower than 80 mm Hg is considered ‘Normal’, however it can never be zero. 
+
+```{r, df_listna}
+list( Column = colSums(df == 0), 
+      Row = sum(rowSums(df == 0)))
+```
+
+```{r, impute_miss}
+# Blood Pressure
+mean_bp <- mean(df$BloodPressure[df$BloodPressure > 0])
+df$BloodPressure <- 
+  ifelse(df$BloodPressure == 0,
+         round(mean_bp,0), df$BloodPressure)
+
+# Glucose
+mean_Glu <- mean(df$Glucose[df$Glucose > 0])
+df$Glucose <- 
+  ifelse(df$Glucose == 0,
+         round(mean_Glu,0), df$Glucose)
+
+# SkinThickness
+mean_SkT <- mean(df$SkinThickness[df$Glucose > 0])
+df$SkinThickness <- 
+  ifelse(df$SkinThickness == 0,
+         round(mean_SkT,0), df$Glucose)
+
+# Insulin
+mean_Insulin <- mean(df$Insulin[df$Insulin > 0])
+df$Insulin <- 
+  ifelse(df$Insulin == 0,
+         round(mean_Insulin,0), df$Insulin)
+
+# BMI
+mean_BMI <- mean(df$BMI [df$BMI  > 0])
+df$BMI  <- 
+  ifelse(df$BMI  == 0,
+         round(mean_BMI ,0), df$BMI)
+
+```
+
+A column and row sum shows that there are 763 zero values which is very alarming. To deal with the large number of zeros, which may represent missing value, it was imputed by the mean. The variable “pregnancies” has a lot of zeros which does not necessarily mean it is a missing value. For instance, a woman can have a record of zero because she is not pregnant.
+
+
+#### Splitting the dataset and Feature Scaling
+```{r, df_split}
+set.seed(123)
+test_index  <- createDataPartition(y = df$Outcome,
+                                   times = 1,
+                                   p = 0.75,
+                                   list = FALSE)
+
+# create training dataset
+training_set <- df[test_index, ] %>%
+  as.data.frame()
+
+# create test dataset
+test_set <- df[-test_index, ]
+
+```
+
+
+
+75% of the dataset is split for training the model and the rest is for validation (testing). Feature scaling is performed after splitting the dataset to normalize or standardize the range of the predictor variable. Without scaling the predictor variables, the model may be biased towards the variable with the higher values.
+
+
+#### Outlier Detection
+```{r, outlier}
+# Outlier Detection
+box_plot <- 
+  function(bivar_name,
+           bivar,
+           data,
+           outcome) {
+  
+  g_1 <-
+    ggplot(data = data,
+           aes(y = bivar,
+               fill = outcome)) +
+    geom_boxplot() +
+    theme_bw() +
+    labs( title = paste(bivar_name,"Outlier Detection", sep =" "),
+          y = bivar_name) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  plot(g_1)
+}
+
+for (x in 1:(ncol(training_set)-1)) {
+  box_plot(bivar_name = names(training_set)[x],
+           bivar = training_set[,x],
+           data = training_set,
+           outcome = training_set[,'Outcome'])
+}
+```
+
+The plots showed that Insulin, Diabetes pedigree and age have the highest outliers. The median of the age of patient tested positive for diabetes is more than the negative. The chances of being diabetic increases with age. The median of the Glucose level of patient tested positive for diabetes is more than 75th Percentile of those tested negative. Hence, a higher glucose level does increase the chances of being diabetic.
+
+
+#### Univariate Analysis
+
+```{r}
+
+univar_graph <- 
+  function(univar_name, univar, data, outcome) {
+    
+    g_1 <- ggplot(data, aes(x=univar)) + 
+      geom_density() + 
+      xlab(univar_name) + 
+      theme_bw()
+    
+    g_2 <- ggplot(data, aes(x=univar, fill= outcome)) + 
+      geom_density(alpha=0.4) + 
+      xlab(univar_name) + 
+      theme_bw()
+    
+    gridExtra::grid.arrange(g_1,
+                            g_2,
+                            ncol=2,
+                            top = paste(univar_name,
+                                        "variable","/ [ Skew:",
+                                        timeDate::skewness(univar),"]"))
+  }
+
+for (x in 1:(ncol(training_set)-1)) {
+  univar_graph(univar_name = names(training_set)[x],
+               univar = training_set[,x],
+               data = training_set,
+               outcome = training_set[,'Outcome'])
+}
+
+```
+
+The Variables Insulin, Diabetes Pedigree Function and age have high skewness to the right, blood pressure and BMI have negative skewness, while pregnancies, glucose, and Skin Thickness have moderate to low right skewness.
+
+
+#### Correlations
+
+```{r, df_corr}
+df_vars <-
+  unlist(lapply(df, is.numeric))  
+
+corrplot::corrplot(cor(df[ , df_vars]),
+                   method="number")
+
+```
+
+From the correlation plot, a moderate correlation (0.54) is observed between Age and Pregnancies. The intensity of the color depicts the correlation between variables either it is weaker or stronger. It is observed that most of the variables are weakly correlated. Hence, multicollinearity does not exist.
+
+
+#### Bivariate Analysis
+```{r, BV1}
+# relationship between BMI and Skin thickness
+ggplot(df,
+        aes(x = BMI,
+            y = SkinThickness,
+            color = Outcome)) +
+ geom_point () + 
+ facet_wrap(~Outcome) +
+  geom_smooth(formula = y ~ x, method = "lm") +
+  labs(title = "BMI vs Skin Thickness",
+       x = "BMI(kg/m squared)",
+       y = "Skin Thickness(mm)") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+This plot vividly shows that a strong relationship exists between BMI and Skin thickness. As BMI increases, skin thickness also increases. The correlation is higher for patient tested negative than those tested positive, but there are some points than could be considered as outliers.
+
+
+```{r, BV4}
+# relationship between Insulin and Glucose
+ggplot(df,
+       aes(x = Insulin,
+           y = Glucose,
+           color = Outcome)) +
+  geom_point () + 
+  facet_wrap(~Outcome) +
+  geom_smooth(formula = y ~ x, method = "lm") +
+  labs(title = "Insulin vs Glucose",
+       x = "Insulin(mu U/ml)",
+       y = "Glucose") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+The plot shows that as insulin level increases, the glucose level increases.
+
+```{r, BV2}
+# Relationship between BMI and diabetes 
+ggplot(df,
+       aes(x = Outcome,
+           y = BMI,
+           color = Outcome)) +
+  geom_boxplot(size=1,
+               outlier.shape = 1,
+               outlier.color = "black",
+               outlier.size  = 3) + 
+  #facet_wrap(~Outcome) +
+  geom_jitter(alpha = 0.5, 
+              width=.2) +
+  labs(title = " BMI vs Diabetes",
+       x = "Diabetes",
+       y = "BMI(kg/m squared)") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Relationship between pregnancies and diabetes 
+ggplot(df,
+       aes(x = Outcome,
+           y = Pregnancies,
+           color = Outcome)) +
+  geom_boxplot(size=1,
+               outlier.shape = 1,
+               outlier.color = "black",
+               outlier.size  = 3) + 
+  #facet_wrap(~Outcome) +
+  geom_jitter(alpha = 0.5, 
+              width=.2) +
+  labs(title = "Pregnancies vs Diabetes",
+       x = "Diabetes",
+       y = "Pregnancies") +
+  theme(legend.position = "none") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+The combined jitter plot and boxplot showed that patients tested positive for diabetes have a higher BMI and Pregnancies than those tested negative. In fact, high BMI often means high risk of diabetes
+
+```{r, BV3}
+# plot the distribution using violin and boxplots
+ggplot(df, 
+       aes(x = Outcome, 
+           y = DiabetesPedigreeFunction)) +
+  geom_violin(fill = "cornflowerblue") +
+  geom_boxplot(width = .2, 
+               fill = "orange",
+               outlier.color = "black",
+               outlier.size = 2) + 
+  labs(title = "Diabetes Pedigree Function vs Diabetes",
+       x = "Diabetes",
+       y = "Diabetes Pedigree Function") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The plot distribution between Diabetes Pedigree Function and Diabetes shown above by a variation of superimpose boxplot on violin plot depicts that most patients tested negative for diabetes, have a diabetes pedigree function less than 0.80. The diabetes pedigree function gives a synthesis of the diabetes mellitus history in an individual’s family. Therefore, there is a likelihood that a patient with a high value will be tested positive for diabetes.
+
+
+#### Logistic Regression
+
+```{r, logit}
+# Fit the model
+logit_model <-
+  glm(formula = Outcome ~ .,
+      family = binomial,
+      data = training_set)
+
+# produce the model summary
+summary(logit_model)
+```
+
+The variable “glucose” "pregnancies", and "BMI" is the most significant, while “diabetes pedigree function” is the least significant.
+
+
+```{r, log_pred}
+
+# Predicting the Test set results
+probability_pred <-
+  predict(logit_model,
+          type = 'response',
+          newdata = test_set)
+LR_pred <-
+  ifelse(probability_pred > 0.5, "Pos", "Neg")
+LR_pred = as.factor(LR_pred)
+
+# Making the Confusion Matrix
+cm_LR <- 
+  confusionMatrix(LR_pred, test_set$Outcome)
+
+# Assessing model accuracy
+mean(LR_pred == test_set$Outcome)
+```
+
+#### Random Forest
+
+```{r, RF_model}
+# Fit a random forest to predict 
+Rf_model <- 
+  randomForest(Outcome ~ .,
+               data = training_set,
+               importance=TRUE)
+Rf_model
+```
+
+```{r, rf_pred}
+# predict the diabetes status on the test set
+Rf_model_pred <-
+  predict(Rf_model,
+          newdata = test_set)
+
+# Making the Confusion Matrix
+cm_Rf <- 
+  confusionMatrix(Rf_model_pred, test_set$Outcome)
+
+# Assessing model accuracy
+mean(Rf_model_pred == test_set$Outcome)
+
+# Evaluate variable-importance measures
+importance(Rf_model)
+varImpPlot(Rf_model, main = "Random Forest Variable importance")
+```
+
+#### Decision Tree
+
+```{r, dec_model}
+# fit the model
+m.rpart <- rpart(Outcome ~ .,
+                 method = "class",
+                 data = training_set, minsplit=1,
+                 minbucket=1,
+                 cp = 0)
+
+```
+
+```{r, dt_pred}
+# predict the diabetes status on the test set
+DT_rpart_pred <- predict(m.rpart, 
+                   newdata = test_set, 
+                   type = "class")
+
+
+# Making the Confusion Matrix
+cm_DT <- 
+  confusionMatrix(DT_rpart_pred, test_set$Outcome)
+
+# Assessing model accuracy
+mean(DT_rpart_pred == test_set$Outcome)
+
+```
+
+#### Decision Tree Visualization
+```{r, viz}
+rpart.plot(m.rpart,
+           type = 2,
+           fallen.leaves = T,
+           extra = 2,
+           cex = 0.70,
+           main="Diabetes Classification Tree")
+
+```
+
+The resulting tree represents the rule to predict wine type. The intensity of a node’s color is proportional to the value predicted at the node.
+The complexity parameter (cp) is used to control the size of the decision tree and to determine the best tree size. When we change cost complexity to 0.5, we can see that the plot now only has one node.
+
+
+#### Diagnostic plots
+```{r, diag_plot}
+# Diagnostic plots
+par(mfrow = c(2, 2))
+plot(logit_model)
+
+```
+
+Although logistic regression does not make vital assumptions on linear regression but other assumptions are checked. From the plots shown below, it can be assumed that there is a linearity the predictors and the log odds, the response variable is binary and ordinal, the observations are independent of each other, there is no multicollinearity among the independent variables and the assumption of normality is met.
+
+#### Visualization to compare Accuracy of Machine Learning Models
+
+```{r, ml_models}
+# Logistic regression accuracy
+graphics::fourfoldplot(cm_LR$table,
+                       color= c("#ed3b3b", "#0099ff"),
+                       conf.level = 0.95,
+                       margin = 1, 
+                       main = paste("Logistic Regression Accuracy(",
+                                    round(cm_LR$overall[1]*100),"%)", sep = ""))
+
+# Random Forest accuracy
+graphics::fourfoldplot(cm_Rf$table,
+                       color= c("#ed3b3b", "#0099ff"),
+                       conf.level = 0.95,
+                       margin = 1, 
+                       main = paste("Random Forest Accuracy(",
+                                    round(cm_Rf$overall[1]*100),"%)", sep = ""))
+
+
+# Decision tree accuracy
+graphics::fourfoldplot(cm_DT$table,
+                        color= c("#ed3b3b", "#0099ff"),
+                       conf.level = 0.95,
+                       margin = 1, 
+                       main = paste("Decision Tree Accuracy(",
+                                    round(cm_DT$overall[1]*100),"%)", sep = ""))
+```
+
+From the above plot, we have that the Random forest model perform better in terms of the accuracy.
+
+#### Conclusion
+
+We have been able to visualize through exploratory and multivariate analysis the variables that contribute to a patient being diabetic.  Three machine learning models were used to predict the chances of a patient being diabetics, of which they are gave a good accuracy, but random forest performed better. 
+
+#### References
+National Diabetes Statistics Report, 2020:  https://www.cdc.gov/diabetes/pdfs/data/statistics/national-diabetes-statistics-report.pdf
+https://www.enjoyalgorithms.com/blog/need-of-feature-scaling-in-machine-learning
+https://towardsdatascience.com/assumptions-of-logistic-regression-clearly-explained-44d85a22b290
