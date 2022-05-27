@@ -1,6 +1,6 @@
 ---
 title: "Stat 515: Visualization for Analytics"
-author: "Kunle Apanisile"
+author: "Kunle"
 date: "May 5, 2022"
 output: html_document
 ---
@@ -14,7 +14,7 @@ Diabetes is caused as a result of high blood sugar. According to the national di
 
 
 #### Objectives
-The essence of this process is to explore factors that contribute to a patient being diabetic and predict if a patient has diabetes or not using logistic regression, decision tree and random forest.  Also, a performance evaluation of this algorithms will be compared.
+The essence of this project is to explore factors that contribute to a patient being diabetic and predict if a patient has diabetes or not using logistic regression, decision tree and random forest.  Also, a performance evaluation of this algorithms will be compared.
 
 
 #### Dataset Description
